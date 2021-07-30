@@ -37,6 +37,10 @@
 #define SC_NOINLINE    __declspec(noinline)
 #define SC_FORCEINLINE __forceinline
 
+#define SC_NAKEDFUNC __declspec(naked)
+#define SC_ASM       __asm
+#define SC_EMIT(c)   __asm _emit(c)
+
 #define SC_DLL_IMPORT __declspec(dllimport)
 #define SC_DLL_EXPORT __declspec(dllexport)
 
@@ -143,28 +147,61 @@ struct PIString<CharType, std::index_sequence<Indices...>> {
 };
 }  // namespace SC
 
+#ifdef SC_WIN64
+#define SC_BEGIN_CODE                                                                              \
+    SC_DLL_EXPORT VOID SCBegin() { SCMain(NULL); }
+#else
+// clang-format off
+#define SC_BEGIN_CODE                                                                              \
+    SC_DLL_EXPORT SC_NAKEDFUNC VOID SCBegin() {                                                    \
+        /* CALL $+5 */                                                                             \
+        SC_EMIT(0xE8) SC_EMIT(0x00) SC_EMIT(0x00) SC_EMIT(0x00) SC_EMIT(0x00)                      \
+        SC_ASM POP EAX                                                                             \
+        SC_ASM LEA EAX, [EAX - 5]                                                                  \
+        SC_ASM LEA ECX, [SCBegin]                                                                  \
+        SC_ASM NEG ECX                                                                             \
+        SC_ASM LEA EAX, [EAX + ECX + SCMain]                                                       \
+        SC_ASM PUSH EAX                                                                            \
+        SC_ASM CALL EAX                                                                            \
+        SC_ASM RET                                                                                 \
+    }
+// clang-format on
+#endif  // SC_WIN64
+
 #define SC_MAIN_BEGIN()                                                                            \
     SC_EXTERN_C_BEGIN                                                                              \
-    SC_DLL_EXPORT VOID SCBegin()
+    SC_DLL_EXPORT VOID WINAPI SCMain(ULONG_PTR SCMainVA);                                          \
+    SC_BEGIN_CODE                                                                                  \
+    SC_DLL_EXPORT VOID WINAPI SCMain(ULONG_PTR SCMainVA)
+
 #define SC_MAIN_END()                                                                              \
     SC_DLL_EXPORT VOID SCEnd() { __debugbreak(); }                                                 \
-    SC_EXTERN_C_END                                                                                \
-    VOID SCMain() { SCBegin(); }
+    SC_EXTERN_C_END
 
 #define SC_PISTRINGA(szLiteralA)                                                                   \
     (::SC::PIString<CHAR, std::make_index_sequence<_countof(szLiteralA)>>(szLiteralA).szBuffer_)
 #define SC_PISTRINGW(szLiteralW)                                                                   \
     (::SC::PIString<WCHAR, std::make_index_sequence<_countof(szLiteralW)>>(szLiteralW).szBuffer_)
 
+#ifdef SC_WIN64
+#define SC_PIFUNCTION(fn) (fn)
+#else
+// Must be invoked in SCMain.
+#define SC_PIFUNCTION(fn) ((decltype(fn)*)(((ULONG_PTR)(fn) - (ULONG_PTR)SCMain) + SCMainVA))
+#endif  // SC_WIN64
+
 #define SC_GET_API_ADDRESS(szDLLName, szAPIName)                                                   \
     (::SC::GetProcAddressByHash<::SC::HashI(szDLLName), ::SC::Hash(szAPIName)>())
+
 #define SC_IMPORT_API(szDLLName, fnAPIName)                                                        \
     auto fnAPIName = (decltype(::fnAPIName)*)SC_GET_API_ADDRESS(szDLLName, #fnAPIName)
 
 #define SC_IMPORT_API_BATCH_BEGIN()                                                                \
     SC_IMPORT_API("Kernel32.dll", LoadLibraryA);                                                   \
     SC_IMPORT_API("Kernel32.dll", GetProcAddress)
+
 #define SC_IMPORT_API_BATCH(szDLLName, fnAPIName)                                                  \
     auto fnAPIName = (decltype(::fnAPIName)*)(GetProcAddress(                                      \
         LoadLibraryA(SC_PISTRINGA(szDLLName)), SC_PISTRINGA(#fnAPIName)))
+
 #define SC_IMPORT_API_BATCH_END()
