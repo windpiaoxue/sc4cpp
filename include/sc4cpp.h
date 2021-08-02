@@ -47,6 +47,13 @@
 #define SC_EXTERN_C_BEGIN extern "C" {
 #define SC_EXTERN_C_END   }
 
+#define SC_CODESEG(s) __declspec(code_seg(s))
+
+#define SC_CODESEG_START      SC_CODESEG(".code$CAA")
+#define SC_CODESEG_END        SC_CODESEG(".code$CZZ")
+#define SC_CODESEG_MAIN       SC_CODESEG(".code$CBA")
+#define SC_CODESEG_REORDERING SC_CODESEG(".code$CXI")
+
 namespace SC {
 // https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function
 template <typename Converter>
@@ -149,11 +156,11 @@ struct PIString<CharType, std::index_sequence<Indices...>> {
 
 #ifdef SC_WIN64
 #define SC_BEGIN_CODE                                                                              \
-    SC_DLL_EXPORT VOID SCBegin() { SCMain(NULL); }
+    SC_DLL_EXPORT SC_CODESEG_START VOID SCBegin() { SCMain(NULL); }
 #else
 // clang-format off
 #define SC_BEGIN_CODE                                                                              \
-    SC_DLL_EXPORT SC_NAKEDFUNC VOID SCBegin() {                                                    \
+    SC_DLL_EXPORT SC_CODESEG_START SC_NAKEDFUNC VOID SCBegin() {                                   \
         /* CALL $+5 */                                                                             \
         SC_EMIT(0xE8) SC_EMIT(0x00) SC_EMIT(0x00) SC_EMIT(0x00) SC_EMIT(0x00)                      \
         SC_ASM POP EAX                                                                             \
@@ -172,10 +179,10 @@ struct PIString<CharType, std::index_sequence<Indices...>> {
     SC_EXTERN_C_BEGIN                                                                              \
     SC_DLL_EXPORT VOID WINAPI SCMain(ULONG_PTR SCMainVA);                                          \
     SC_BEGIN_CODE                                                                                  \
-    SC_DLL_EXPORT VOID WINAPI SCMain(ULONG_PTR SCMainVA)
+    SC_DLL_EXPORT SC_CODESEG_MAIN VOID WINAPI SCMain(ULONG_PTR SCMainVA)
 
 #define SC_MAIN_END()                                                                              \
-    SC_DLL_EXPORT VOID SCEnd() { __debugbreak(); }                                                 \
+    SC_DLL_EXPORT SC_CODESEG_END VOID SCEnd() { __debugbreak(); }                                  \
     SC_EXTERN_C_END
 
 #define SC_PISTRINGA(szLiteralA)                                                                   \
@@ -187,7 +194,8 @@ struct PIString<CharType, std::index_sequence<Indices...>> {
 #define SC_PIFUNCTION(fn) (fn)
 #else
 // Must be invoked in SCMain.
-#define SC_PIFUNCTION(fn) ((decltype(fn)*)(((ULONG_PTR)(fn) - (ULONG_PTR)SCMain) + SCMainVA))
+#define SC_PIFUNCTION(fnReordering)                                                                \
+    ((decltype(fnReordering)*)(((ULONG_PTR)(fnReordering) - (ULONG_PTR)SCMain) + SCMainVA))
 #endif  // SC_WIN64
 
 #define SC_GET_API_ADDRESS(szDLLName, szAPIName)                                                   \
